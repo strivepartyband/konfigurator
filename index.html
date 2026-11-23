@@ -147,6 +147,11 @@ main{display:grid;grid-template-columns:minmax(0,1fr) clamp(390px,34vw,480px)}
 .ov-b summary{cursor:pointer;padding:6px 0}
 .ov-b pre{margin:8px 0 0;padding:14px;background:var(--bg);border-radius:6px;overflow:auto;max-height:200px;font-size:12px;line-height:1.5;color:var(--ant)}
 .ov-f{padding:18px 28px 22px;border-top:1px solid var(--line);display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.lnk{margin-top:14px;padding:0;background:none;border:0;border-bottom:1px solid var(--gold);color:var(--ink);font-size:13px;font-weight:600;padding-bottom:2px}
+.lnk:hover{color:var(--gold)}
+.toast{position:fixed;left:50%;bottom:calc(var(--bar) + 18px);transform:translate(-50%,20px);z-index:120;max-width:min(520px,92vw);padding:13px 20px;border-radius:6px;background:var(--ink);color:#fff;font-size:14px;line-height:1.4;opacity:0;pointer-events:none;transition:.3s}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+.toast.err{background:#8c2a22}
 .ov-f p{flex:1;min-width:200px;margin:0;font-size:12.5px;color:var(--gr);line-height:1.45}
 .ov-f .btn{border-color:var(--line);color:var(--ink)}
 .ov-f .btn:hover{border-color:var(--ink)}
@@ -217,7 +222,7 @@ main{display:grid;grid-template-columns:minmax(0,1fr) clamp(390px,34vw,480px)}
  </section>
 
  <aside class="panel" id="panel">
-  <div class="p-intro"><h2>Ihr Model 1</h2><p>Das Grundmodell kostet 25 <svg class="dia"><use href="#dia"/></svg> Diamanten. Alle Serienmerkmale sind enthalten, jede Option darüber hinaus wird zum Grundpreis addiert.</p></div>
+  <div class="p-intro"><h2>Ihr Model 1</h2><p>Das Grundmodell kostet 25 <svg class="dia"><use href="#dia"/></svg> Diamanten. Alle Serienmerkmale sind enthalten, jede Option darüber hinaus wird zum Grundpreis addiert.</p><button class="lnk" id="imp2">Konfiguration aus XML importieren</button></div>
   <div id="cats"></div>
  </aside>
 </main>
@@ -232,10 +237,12 @@ main{display:grid;grid-template-columns:minmax(0,1fr) clamp(390px,34vw,480px)}
  <div class="sheet">
   <div class="ov-h"><span id="logoO" style="display:flex"></span><div><b>Schlopp Universalwerke</b><span>Bestellübersicht Model 1</span></div><button class="x" id="cl">Schließen</button></div>
   <div class="ov-b" id="ovb"></div>
-  <div class="ov-f"><p>Dies ist eine Konfigurationsübersicht. Es findet keine Zahlung statt.</p><button class="btn" id="back">Weiter konfigurieren</button><button class="btn gold" id="dl">XML herunterladen</button></div>
+  <div class="ov-f"><p>Dies ist eine Konfigurationsübersicht. Es findet keine Zahlung statt.</p><button class="btn" id="imp">XML importieren</button><button class="btn" id="back">Weiter konfigurieren</button><button class="btn gold" id="dl">XML herunterladen</button></div>
  </div>
 </div>
 
+<input type="file" id="impf" accept=".xml,application/xml,text/xml" hidden>
+<div class="toast" id="toast" role="status"></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
 (()=>{'use strict';
@@ -368,6 +375,43 @@ function openOrder(){
  $('#ov').classList.add('show');$('#dl').focus()}
 function download(){const b=new Blob([buildXML()],{type:'application/xml'}),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='SU-Model1-Konfiguration.xml';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),1500)}
 const closeOrder=()=>$('#ov').classList.remove('show');
+
+/* XML-Import: liest eine zuvor exportierte Konfiguration ein und prüft sie vor dem Übernehmen */
+let tt=0;
+function toast(msg,err){const t=$('#toast');t.textContent=msg;t.classList.toggle('err',!!err);t.classList.add('show');clearTimeout(tt);tt=setTimeout(()=>t.classList.remove('show'),4200)}
+function parseXML(text){
+ const doc=new DOMParser().parseFromString(text,'application/xml');
+ if(doc.querySelector('parsererror'))throw new Error('Die Datei ist kein gültiges XML.');
+ const r=doc.documentElement;
+ if(r.nodeName!=='Konfiguration')throw new Error('Das ist keine SU-Konfiguration (Wurzelelement „Konfiguration“ fehlt).');
+ const q=(p)=>r.querySelector(p),txt=p=>{const e=q(p);return e?e.textContent.trim():''};
+ if(txt('Modell')!=='Model 1')throw new Error('Diese Konfiguration gehört nicht zum Model 1.');
+ const N={...DEF};
+ const mo=+(q('Motorisierung')||{getAttribute:()=>0}).getAttribute('anzahl');if(![1,2,3,4].includes(mo))throw new Error('Ungültige Motorenanzahl.');N.motors=mo;
+ const cf=q('Ballonfarbe')&&q('Ballonfarbe').getAttribute('wert');if(!COL.some(c=>c[0]===cf))throw new Error('Unbekannte Ballonfarbe.');N.color=cf;
+ const hw=q('Holzart')&&q('Holzart').getAttribute('wert');if(!WOOD.some(c=>c[0]===hw))throw new Error('Unbekannte Holzart.');N.wood=hw;
+ const sz=+(q('Sitzplaetze')||{getAttribute:()=>0}).getAttribute('anzahl');if(![1,2,3,4].includes(sz))throw new Error('Ungültige Sitzanzahl.');N.seats=sz;
+ const tf=q('Treibstoffsystem')&&q('Treibstoffsystem').getAttribute('typ')||'';N.fuel=/doppel/i.test(tf)?'double':'single';
+ /* Extras: angehakt="true" bedeutet ausgewählt */
+ const ex={};r.querySelectorAll('Extras > Extra').forEach(e=>ex[e.getAttribute('id')]=e);
+ const on=id=>ex[id]&&ex[id].getAttribute('angehakt')==='true';
+ ['wre','winch','ahk','comfort','upgrade'].forEach(id=>N[id]=!!on(id));
+ if(on('beschriftung')){
+  const e=ex.beschriftung,g=t=>{const n=e.querySelector(t);return n?n.textContent.trim():''};
+  N.txtOn=true;N.txt=g('Text').slice(0,20);
+  const sg={Klein:'s',Mittel:'m','Groß':'l'}[g('Schriftgroesse')];if(sg)N.txtSize=sg;
+  const ps={Vorne:'vorne',Mitte:'mitte',Hinten:'hinten'}[g('Position')];if(ps)N.txtPos=ps;
+  if(/^#[0-9a-fA-F]{6}$/.test(g('Schriftfarbe')))N.txtColor=g('Schriftfarbe').toLowerCase();
+ }
+ return N}
+function importFile(f){
+ if(!f)return;const rd=new FileReader();
+ rd.onload=()=>{try{S=parseXML(String(rd.result));$('#txt').value=S.txt;$('#tcp').value=S.txtColor;closeOrder();update();toast('Konfiguration importiert: '+total()+' Diamanten.')}
+  catch(err){toast('Import fehlgeschlagen. '+err.message,true)}};
+ rd.onerror=()=>toast('Die Datei konnte nicht gelesen werden.',true);rd.readAsText(f)}
+const pick=()=>{$('#impf').value='';$('#impf').click()};
+$('#imp').onclick=pick;$('#imp2').onclick=pick;$('#impf').onchange=e=>importFile(e.target.files[0]);
+
 
 /* ===== 7. Bedienung ===== */
 $('#cats').addEventListener('click',e=>{
